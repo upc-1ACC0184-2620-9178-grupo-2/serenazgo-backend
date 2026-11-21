@@ -29,7 +29,7 @@ uvicorn app.main:app --reload --port 8000
 - API: http://127.0.0.1:8000 · documentación interactiva: http://127.0.0.1:8000/docs
 - CORS: por defecto permite http://localhost:4200 (Angular). Otros orígenes:
   `ORIGENES_PERMITIDOS="https://mi-sitio.com,http://localhost:4200"`.
-- Pruebas: `python -m pytest -q` (31 pruebas: algoritmos vs NetworkX, dominio, planificación, contrato HTTP y reglas de arquitectura).
+- Pruebas: `python -m pytest -q` (39 pruebas: algoritmos vs NetworkX, dominio, planificación, contrato HTTP y reglas de arquitectura).
 
 ## Bounded contexts
 
@@ -112,11 +112,26 @@ con fechas y horas, y el plan **cambia con cada evento** (llegada, cancelación,
 Algoritmo: inserción más barata por prioridad + búsqueda local (reubicar eventos), sobre la función de costo
 `retraso·peso + respuesta + viaje + balance·carga² + costo_activación`, con Dijkstra para los tiempos de viaje.
 
+### Tiempo real (hora de Lima)
+Por defecto el plan **sigue la hora real de Lima (UTC-5)** y los eventos nuevos llegan solos:
+- **Turnos de 8 h alineados al reloj:** 07:00–15:00, 15:00–23:00 y 23:00–07:00. Al arrancar, el turno en curso recupera lo ocurrido
+  desde su inicio hasta ahora; al terminar abre el siguiente (con las mismas unidades, de nuevo en sus bases).
+- **Eventos en vivo:** accidentes de tránsito, robos, disturbios... aparecen con una intensidad por hora del día
+  (`eventos_por_hora`, por defecto 40), en zonas calientes, con prioridad y duración según las reglas; algunos se cancelan solos.
+  Cada uno se **integra y se reasigna al instante**. No hace falta un proceso aparte: el plan se pone al día en cada consulta
+  (`GET /api/plan`), así que el frontend solo debe consultarlo cada pocos segundos.
+- **Demo:** `POST /api/plan/velocidad {"velocidad": 60}` acelera el reloj (60 = una hora por minuto). 1 = hora real.
+- **Modo simulado:** `POST /api/plan/escenario {"tiempo_real": false, ...}` crea un día pregenerado que se avanza con `/api/plan/reloj`
+  (en tiempo real ese endpoint responde 422).
+- Perú no tiene horario de verano, por eso se usa un desfase fijo UTC-5 (sin depender de `tzdata`). El estado vive en memoria:
+  si Railway reinicia o duerme el servicio, se retoma el turno actual con la hora real.
+
 | Método y ruta | Descripción |
 |---|---|
 | GET /api/plan | Estado completo: turno, serenazgos con sus tareas, eventos, métricas |
-| POST /api/plan/escenario | Genera un día (`n_serenazgos`, `n_eventos`, `horas`≥8, `pct_programados`, `estrategia`) |
-| POST /api/plan/reloj | `{"minutos": 60}` avanza el reloj |
+| POST /api/plan/escenario | Genera un turno (`n_serenazgos`, `horas`≥8, `estrategia`, `tiempo_real`, `eventos_por_hora`, `velocidad`; o `n_eventos` y `pct_programados` en modo simulado) |
+| POST /api/plan/reloj | `{"minutos": 60}` avanza el reloj (solo en modo simulado) |
+| POST /api/plan/velocidad | `{"velocidad": 60}` acelera el reloj en tiempo real (demo) |
 | POST /api/plan/eventos | Registra un evento nuevo ahora y lo asigna |
 | POST /api/plan/eventos/{id}/cancelar | Cancela y reasigna |
 | POST /api/plan/serenazgos/{id}/baja | Saca una unidad de servicio y reasigna |

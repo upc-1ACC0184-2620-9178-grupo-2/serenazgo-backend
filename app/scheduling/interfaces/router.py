@@ -18,11 +18,18 @@ class EscenarioIn(BaseModel):
     inicio: datetime | None = None
     semilla: int = 42
     estrategia: str = "rapida"
-    pct_programados: float = Field(0.5, ge=0.0, le=1.0)   # parte de la agenda conocida de antemano
+    pct_programados: float | None = Field(None, ge=0.0, le=1.0)   # parte de la agenda conocida de antemano
+    tiempo_real: bool = True                  # el turno sigue la hora de Lima y los eventos llegan solos
+    eventos_por_hora: float = Field(40.0, ge=0, le=600)
+    velocidad: float = Field(1.0, ge=1, le=600)        # 1 = hora real; >1 = demo acelerada
 
 
 class RelojIn(BaseModel):
     minutos: float = Field(gt=0, le=1440)
+
+
+class VelocidadIn(BaseModel):
+    velocidad: float = Field(ge=1, le=600)
 
 
 class EventoIn(BaseModel):
@@ -56,13 +63,18 @@ def crear_router(plan: ServicioPlan, lock: RLock) -> APIRouter:
     def escenario(d: EscenarioIn):
         with lock:
             plan.crear_escenario(d.n_serenazgos, d.n_eventos, d.horas, d.inicio, d.semilla, d.estrategia,
-                                d.pct_programados)
+                                d.pct_programados, d.tiempo_real, d.eventos_por_hora, d.velocidad)
             return plan.vista()
 
     @r.post("/reloj")
     def reloj(d: RelojIn):
         with lock:
             return plan.avanzar_reloj(d.minutos)
+
+    @r.post("/velocidad")
+    def velocidad(d: VelocidadIn):
+        with lock:
+            return plan.cambiar_velocidad(d.velocidad)
 
     @r.post("/eventos", status_code=201)
     def registrar(d: EventoIn):

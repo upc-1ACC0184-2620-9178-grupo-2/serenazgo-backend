@@ -38,7 +38,7 @@ def crear_proveedor() -> GraphProvider:
 
 class Contenedor:
     def __init__(self, proveedor: GraphProvider | None = None,
-                 params: ParametrosDeEscenario | None = None):
+                 params: ParametrosDeEscenario | None = None, reloj=None):
         self.lock = RLock()
         self.bus = BusDeEventos()
 
@@ -55,7 +55,8 @@ class Contenedor:
 
         # planificación de turno (reloj, rutas multi-evento, reasignación, redistribución)
         _red, _bases = RedViaAdapter(self.red), BasesAdapter(self.flota)
-        self.plan = ServicioPlan(_red, _bases, GeneradorDeEscenario(_red, _bases), PlanEnMemoria(), self.bus)
+        self.plan = ServicioPlan(_red, _bases, GeneradorDeEscenario(_red, _bases), PlanEnMemoria(), self.bus,
+                                  *([reloj] if reloj else []))
 
         # eventos: quién reacciona a quién
         suscriptores_incidentes.registrar(self.bus, self.incidentes)
