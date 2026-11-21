@@ -19,6 +19,10 @@ from app.incidents.infrastructure.red_adapter import UbicadorRedAdapter
 from app.network.application.servicio_red_vial import ServicioRedVial
 from app.network.domain.graph_provider import GraphProvider
 from app.network.infrastructure.simulated_graph_provider import SimulatedGraphProvider
+from app.scheduling.application.servicio_plan import ServicioPlan
+from app.scheduling.infrastructure.adaptadores import BasesAdapter, RedViaAdapter
+from app.scheduling.infrastructure.generador import GeneradorDeEscenario
+from app.scheduling.infrastructure.memoria import PlanEnMemoria
 from app.shared.kernel.eventos import BusDeEventos
 from app.simulation.application.servicio_escenario import ServicioEscenario
 from app.simulation.domain.parametros import ParametrosDeEscenario
@@ -48,6 +52,10 @@ class Contenedor:
         if params is None:
             params = ParametrosDeEscenario(dataset_csv=os.getenv("DATASET_CSV"))
         self.escenario = ServicioEscenario(self.red, self.flota, self.incidentes, self.bus, params)
+
+        # planificación de turno (reloj, rutas multi-evento, reasignación, redistribución)
+        _red, _bases = RedViaAdapter(self.red), BasesAdapter(self.flota)
+        self.plan = ServicioPlan(_red, _bases, GeneradorDeEscenario(_red, _bases), PlanEnMemoria(), self.bus)
 
         # eventos: quién reacciona a quién
         suscriptores_incidentes.registrar(self.bus, self.incidentes)

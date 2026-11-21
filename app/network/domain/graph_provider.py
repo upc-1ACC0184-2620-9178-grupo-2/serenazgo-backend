@@ -38,6 +38,10 @@ class GraphProvider(ABC):
         """Ubica un punto (base o incidente) en la red y devuelve su nodo."""
 
     @abstractmethod
+    def nodo_mas_cercano(self, x: float, y: float) -> int:
+        """Intersección más cercana al punto (no modifica el grafo)."""
+
+    @abstractmethod
     def bloquear_tramo(self, a: int, b: int) -> bool: ...
 
     @abstractmethod
