@@ -1,7 +1,9 @@
 """Raíz de agregado PlanDeTurno: el día de trabajo de todos los serenazgos."""
 from __future__ import annotations
 
+import random
 from dataclasses import replace
+from datetime import datetime
 
 from app.scheduling.domain.modelos import (
     ESTRATEGIAS, EstrategiaDePlanificacion, Evento, Movimiento, ReglasDeAtencion, Serenazgo, Tarea, Turno,
@@ -28,6 +30,15 @@ class PlanDeTurno:
         self.futuras: dict[int, list[int]] = {i: [] for i in self.serenazgos}
         self.tareas_futuras: dict[int, list[Tarea]] = {i: [] for i in self.serenazgos}
         self.costos: dict[int, float] = {i: 0.0 for i in self.serenazgos}
+        # reloj en tiempo real: el minuto del plan avanza con la hora de Lima (× velocidad)
+        self.tiempo_real = False
+        self.velocidad = 1.0
+        self.ref_real: datetime | None = None     # hora real (Lima) de la última sincronización
+        self.ref_min = 0.0                        # minuto del plan en ese momento
+        self.eventos_por_hora = 0.0               # intensidad de eventos nuevos (modo tiempo real)
+        self.focos: list[tuple[float, float]] = []  # zonas calientes de la ciudad
+        self.rng = random.Random(0)
+        self.generado_hasta = 0.0                 # hasta qué minuto se han generado eventos nuevos
 
     # ---- tiempo y estado de cada serenazgo --------------------------------
     def minutos_de(self, e: Evento) -> float:
@@ -86,6 +97,9 @@ class PlanDeTurno:
         if self.ahora >= t.fin - EPS:
             return "atendido"
         return "atendiendo" if self.ahora >= t.inicio - EPS else "en_camino"
+
+    def siguiente_id(self) -> int:
+        return max([*self.eventos, *(g.id for g in self.guion)], default=0) + 1
 
     # ---- comandos --------------------------------------------------------------
     def reportar(self, e: Evento) -> None:

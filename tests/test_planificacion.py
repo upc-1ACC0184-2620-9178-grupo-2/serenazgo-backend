@@ -132,10 +132,10 @@ def test_redistribuir_acerca_a_los_libres_a_la_demanda(svc):
 
 def test_api_plan_completo():
     c = TestClient(crear_app(Contenedor()))
-    v = c.post("/api/plan/escenario", json={"n_serenazgos": 100, "n_eventos": 150, "semilla": 5}).json()
+    v = c.post("/api/plan/escenario", json={"n_serenazgos": 100, "n_eventos": 150, "semilla": 5, "tiempo_real": False}).json()
     assert len(v["serenazgos"]) == 100 and v["turno"]["horas"] == 8
     assert set(v) >= {"turno", "estrategia", "estrategias", "serenazgos", "eventos", "sin_cobertura", "bases", "metricas"}
-    assert c.post("/api/plan/escenario", json={"horas": 6}).status_code == 422      # mínimo 8 h
+    assert c.post("/api/plan/escenario", json={"horas": 6, "tiempo_real": False}).status_code == 422      # mínimo 8 h
 
     r = c.post("/api/plan/reloj", json={"minutos": 90}).json()
     assert r["hora"] == "09:30" or r["ahora_min"] == 90

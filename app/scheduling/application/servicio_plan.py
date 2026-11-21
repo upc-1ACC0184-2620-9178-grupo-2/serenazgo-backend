@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from app.scheduling.domain import eventos as ev
-from app.scheduling.domain.modelos import ESTRATEGIAS, Evento
+from app.scheduling.domain.modelos import ESTRATEGIAS, Evento, Serenazgo
 from app.scheduling.domain.plan import EPS, PlanDeTurno
 from app.scheduling.domain.planificador import Planificador
 from app.scheduling.domain.puertos import BasesPort, PlanRepository, RedViaPort
@@ -15,19 +16,27 @@ from app.shared.kernel.eventos import BusDeEventos
 from app.shared.kernel.prioridad import Prioridad
 
 PRESUPUESTO_S = 1.0
+ZONA = timezone(timedelta(hours=-5))      # Perú: UTC-5, sin horario de verano
+
+
+def ahora_lima() -> datetime:
+    """Hora real de Lima (sin zona, para compararla con el inicio del turno)."""
+    return datetime.now(ZONA).replace(tzinfo=None)
 
 
 class ServicioPlan:
-    def __init__(self, red: RedViaPort, bases: BasesPort, generador, repo: PlanRepository, bus: BusDeEventos):
+    def __init__(self, red: RedViaPort, bases: BasesPort, generador, repo: PlanRepository, bus: BusDeEventos,
+                 reloj: Callable[[], datetime] = ahora_lima):
         self._red, self._bases, self._gen, self._repo, self._bus = red, bases, generador, repo, bus
+        self._reloj = reloj                     # inyectable: las pruebas usan un reloj falso
 
     # ---- acceso -----------------------------------------------------------------
     def plan(self) -> PlanDeTurno:
         p = self._repo.obtener()
-        if p is None:                       # primer uso: escenario por defecto
-            self.crear_escenario()
+        if p is None:                       # primer uso: turno en vivo con la hora real de Lima
+            self.crear_escenario(tiempo_real=True)
             p = self._repo.obtener()
-        return p
+        return self._sincronizar(p)         # en tiempo real, adelanta el plan hasta la hora actual
 
     def _planificador(self) -> Planificador:
         return Planificador(self._red)
@@ -35,20 +44,83 @@ class ServicioPlan:
     # ---- escenario --------------------------------------------------------------
     def crear_escenario(self, n_serenazgos: int = 100, n_eventos: int = 300, horas: float = 8.0,
                         inicio: datetime | None = None, semilla: int = 42,
-                        estrategia: str = "rapida", pct_programados: float = 0.5) -> PlanDeTurno:
+                        estrategia: str = "rapida", pct_programados: float | None = None,
+                        tiempo_real: bool = False, eventos_por_hora: float = 40.0,
+                        velocidad: float = 1.0) -> PlanDeTurno:
+        """Modo simulado: un día pregenerado que se recorre con el reloj manual.
+        Modo tiempo real: el turno sigue la hora de Lima y los eventos nuevos aparecen solos."""
         if estrategia not in ESTRATEGIAS:
             raise Invalido(f"Estrategia desconocida: {estrategia}.")
         if not (1 <= n_serenazgos <= 500) or not (0 <= n_eventos <= 1000):
             raise Invalido("Cantidad de serenazgos (1-500) o de eventos (0-1000) fuera de rango.")
-        plan = self._gen.generar(n_serenazgos, n_eventos, horas, inicio, semilla, estrategia,
-                                 pct_programados=pct_programados)
+        if not (0 <= eventos_por_hora <= 600) or not (1 <= velocidad <= 600):
+            raise Invalido("Eventos por hora (0-600) o velocidad (1-600) fuera de rango.")
+        if tiempo_real:
+            plan = self._gen.generar_en_vivo(
+                self._reloj(), n_serenazgos, horas, eventos_por_hora, velocidad, semilla, estrategia,
+                pct_agenda=0.15 if pct_programados is None else pct_programados)
+        else:
+            plan = self._gen.generar(n_serenazgos, n_eventos, horas, inicio, semilla, estrategia,
+                                     pct_programados=0.5 if pct_programados is None else pct_programados)
         self._repo.guardar(plan)
         pl = self._planificador()
         pl.construir(plan)                      # reparte la agenda conocida de antemano
         pl.mejorar(plan, PRESUPUESTO_S)
         self._procesar_instante(plan, pl)
-        self._bus.publicar(ev.PlanGenerado(serenazgos=n_serenazgos, eventos=n_eventos, estrategia=estrategia))
+        if tiempo_real:
+            self._sincronizar(plan, pl)         # recupera lo ocurrido desde el inicio del turno hasta ahora
+        self._bus.publicar(ev.PlanGenerado(serenazgos=n_serenazgos, eventos=len(plan.eventos) + len(plan.guion),
+                                           estrategia=estrategia))
         return plan
+
+    # ---- tiempo real ------------------------------------------------------------
+    def _sincronizar(self, plan: PlanDeTurno, pl: Planificador | None = None) -> PlanDeTurno:
+        """Lleva el plan hasta la hora actual: genera los eventos nuevos (accidentes, robos...),
+        los integra, aplica cancelaciones y, si terminó el turno, abre el siguiente."""
+        if not plan.tiempo_real:
+            return plan
+        ahora = self._reloj()
+        objetivo = plan.ref_min + (ahora - plan.ref_real).total_seconds() / 60 * plan.velocidad
+        dur = plan.turno.duracion_min
+        pl = pl or self._planificador()
+        if objetivo >= dur:                     # cambio de turno
+            self._avanzar_en_vivo(plan, pl, dur)
+            nuevo = self._siguiente_turno(plan, objetivo - dur, ahora)
+            self._repo.guardar(nuevo)
+            pl.construir(nuevo)
+            pl.mejorar(nuevo, PRESUPUESTO_S)
+            self._procesar_instante(nuevo, pl)
+            self._bus.publicar(ev.PlanGenerado(serenazgos=len(nuevo.serenazgos), eventos=0, estrategia=nuevo.estrategia.nombre))
+            return self._sincronizar(nuevo, pl)
+        if objetivo > plan.ahora + 1e-6:
+            self._avanzar_en_vivo(plan, pl, objetivo)
+        return plan
+
+    def _avanzar_en_vivo(self, plan: PlanDeTurno, pl: Planificador, hasta: float) -> None:
+        plan.guion += self._gen.eventos_en_vivo(plan, plan.generado_hasta, hasta)
+        plan.generado_hasta = hasta
+        self._avanzar(plan, pl, hasta)
+
+    def _siguiente_turno(self, plan: PlanDeTurno, sobrante: float, ahora: datetime) -> PlanDeTurno:
+        dur = plan.turno.duracion_min
+        saltos = int(sobrante // dur)           # si el servidor estuvo dormido varios turnos, los salta
+        sobrante -= saltos * dur
+        ser = [Serenazgo(s.id, s.tipo, s.id_base, s.nodo_base) for s in plan.serenazgos.values()]
+        return self._gen.generar_en_vivo(
+            ahora, horas=plan.turno.horas, eventos_por_hora=plan.eventos_por_hora, velocidad=plan.velocidad,
+            semilla=plan.rng.randrange(10 ** 6), estrategia=plan.estrategia.nombre,
+            inicio=plan.turno.fin + timedelta(minutes=saltos * dur), ref_min=sobrante, serenazgos=ser)
+
+    def cambiar_velocidad(self, velocidad: float) -> dict:
+        """Demo: acelera el reloj (1 = hora real, 60 = una hora por minuto)."""
+        plan = self.plan()
+        if not plan.tiempo_real:
+            raise Invalido("La velocidad solo aplica en modo tiempo real.")
+        if not (1 <= velocidad <= 600):
+            raise Invalido("La velocidad debe estar entre 1 y 600.")
+        plan.velocidad = velocidad
+        plan.ref_real, plan.ref_min = self._reloj(), plan.ahora
+        return {"velocidad": velocidad}
 
     # ---- lógica de eventos del plan (opera sobre un plan dado, sirve también para "qué pasa si") ----
     def _procesar_instante(self, plan: PlanDeTurno, pl: Planificador) -> list[int]:
@@ -109,6 +181,8 @@ class ServicioPlan:
         if minutos <= 0:
             raise Invalido("Los minutos a avanzar deben ser positivos.")
         plan, pl = self.plan(), self._planificador()
+        if plan.tiempo_real:
+            raise Invalido("El reloj sigue la hora real. Genera un escenario simulado para avanzarlo a mano.")
         antes = plan.asignacion()
         self._avanzar(plan, pl, plan.ahora + minutos)
         hora = plan.turno.a_fecha(plan.ahora).strftime("%H:%M")
@@ -264,7 +338,9 @@ class ServicioPlan:
         return {
             "turno": {"inicio": plan.turno.inicio.isoformat(timespec="minutes"),
                       "fin": plan.turno.fin.isoformat(timespec="minutes"), "horas": plan.turno.horas,
-                      "duracion_min": plan.turno.duracion_min, "ahora_min": round(plan.ahora, 1),
+                      "duracion_min": plan.turno.duracion_min, "ahora_min": round(plan.ahora, 3),
+                      "tiempo_real": plan.tiempo_real, "velocidad": plan.velocidad,
+                      "zona_horaria": "Lima (UTC-5)", "eventos_por_hora": plan.eventos_por_hora,
                       "ahora": fecha(plan.ahora).isoformat(timespec="minutes"),
                       "hora": fecha(plan.ahora).strftime("%H:%M")},
             "estrategia": plan.estrategia.nombre,
