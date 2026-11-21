@@ -25,7 +25,7 @@ def crear_app(c: Contenedor | None = None) -> FastAPI:
     c = c or Contenedor()
     app = FastAPI(title="Asignación de serenazgo - Ventanilla", version="3.0")
 
-    origenes = os.getenv("ORIGENES_PERMITIDOS", "http://localhost:4200,http://127.0.0.1:4200").split(",")
+    origenes = os.getenv("ORIGENES_PERMITIDOS", "https://serenazgo-frontend1.vercel.app").split(",")
     app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in origenes],
                        allow_methods=["*"], allow_headers=["*"])
 
