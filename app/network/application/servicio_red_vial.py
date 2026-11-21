@@ -21,6 +21,12 @@ class ServicioRedVial:
     def ubicar_punto(self, x: float, y: float, k: int = 2) -> int:
         return self._p.ubicar(x, y, k)
 
+    def nodo_cercano(self, x: float, y: float) -> int:
+        return self._p.nodo_mas_cercano(x, y)
+
+    def coordenadas_de(self, nodo: int) -> tuple[float, float]:
+        return self._p.coordenadas()[nodo]
+
     def caminos_desde(self, nodo: int) -> CaminosMinimos:
         """Dijkstra desde `nodo`, con caché que se invalida al cambiar la red."""
         if self._version != self._p.version:

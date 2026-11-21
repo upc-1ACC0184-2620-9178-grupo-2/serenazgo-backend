@@ -97,3 +97,12 @@ def test_cors_para_angular(cliente):
     r = cliente.options("/api/red", headers={"Origin": "http://localhost:4200",
                                              "Access-Control-Request-Method": "GET"})
     assert r.headers.get("access-control-allow-origin") == "http://localhost:4200"
+
+
+def test_cors_permite_el_frontend_desplegado_en_vercel(cliente):
+    r = cliente.options("/api/plan", headers={"Origin": "https://serenazgo-frontend1.vercel.app",
+                                              "Access-Control-Request-Method": "GET"})
+    assert r.headers.get("access-control-allow-origin") == "https://serenazgo-frontend1.vercel.app"
+    ajeno = cliente.options("/api/plan", headers={"Origin": "https://sitio-ajeno.com",
+                                                  "Access-Control-Request-Method": "GET"})
+    assert "access-control-allow-origin" not in ajeno.headers

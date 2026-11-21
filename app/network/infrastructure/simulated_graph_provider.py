@@ -102,6 +102,9 @@ class SimulatedGraphProvider(GraphProvider):
         self._ver += 1
         return idx
 
+    def nodo_mas_cercano(self, x, y):
+        return self._cercanos(x, y, 1)[0]
+
     def bloquear_tramo(self, a, b):
         if not self._G.has_edge(a, b):
             return False

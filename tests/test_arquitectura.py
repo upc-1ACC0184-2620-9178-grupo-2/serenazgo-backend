@@ -3,7 +3,7 @@ import ast
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[1] / "app"
-CONTEXTOS = {"network", "fleet", "incidents", "dispatch", "audit", "simulation"}
+CONTEXTOS = {"network", "fleet", "incidents", "dispatch", "audit", "simulation", "scheduling"}
 
 
 def _imports(archivo: Path) -> set[str]:

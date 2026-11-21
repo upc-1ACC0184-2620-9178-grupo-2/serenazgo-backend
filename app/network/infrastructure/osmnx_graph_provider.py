@@ -63,6 +63,9 @@ class OsmnxGraphProvider(GraphProvider):
         return min(range(len(self._xy)),
                    key=lambda j: (self._xy[j][0] - x) ** 2 + (self._xy[j][1] - y) ** 2)
 
+    def nodo_mas_cercano(self, x, y):
+        return self.ubicar(x, y)
+
     def bloquear_tramo(self, a, b):
         if not self._G.has_edge(a, b):
             return False
