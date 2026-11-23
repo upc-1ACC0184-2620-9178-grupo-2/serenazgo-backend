@@ -38,6 +38,18 @@ class GraphProvider(ABC):
         """Ubica un punto (base o incidente) en la red y devuelve su nodo."""
 
     @abstractmethod
+    def contiene(self, x: float, y: float) -> bool:
+        """true si el punto está dentro de la zona de operación (el distrito)."""
+
+    @abstractmethod
+    def region(self) -> list[tuple[float, float]] | None:
+        """Contorno de la zona de operación en coordenadas del plano (o None si es un rectángulo)."""
+
+    @abstractmethod
+    def anclaje(self) -> tuple[float, float] | None:
+        """(lat, lng) del origen del plano si el plano es un mapa local en km; None si ya es geográfico."""
+
+    @abstractmethod
     def nodo_mas_cercano(self, x: float, y: float) -> int:
         """Intersección más cercana al punto (no modifica el grafo)."""
 

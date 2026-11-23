@@ -139,8 +139,9 @@ def test_api_plan_completo():
 
     r = c.post("/api/plan/reloj", json={"minutos": 90}).json()
     assert r["hora"] == "09:30" or r["ahora_min"] == 90
+    x, y = c.get("/api/red").json()["nodos"][0]
     ev = c.post("/api/plan/eventos", json={"tipologia": "Robo en vía pública", "direccion": "Calle 1",
-                                          "prioridad": "A", "x": 4.0, "y": 2.5})
+                                          "prioridad": "A", "x": x, "y": y})
     assert ev.status_code == 201 and ev.json()["serenazgo_id"] is not None
     nuevo = ev.json()["evento_id"]
     assert c.post(f"/api/plan/eventos/{nuevo}/cancelar").status_code == 200

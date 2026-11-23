@@ -21,6 +21,9 @@ class ServicioRedVial:
     def ubicar_punto(self, x: float, y: float, k: int = 2) -> int:
         return self._p.ubicar(x, y, k)
 
+    def contiene(self, x: float, y: float) -> bool:
+        return self._p.contiene(x, y)
+
     def nodo_cercano(self, x: float, y: float) -> int:
         return self._p.nodo_mas_cercano(x, y)
 
@@ -63,4 +66,6 @@ class ServicioRedVial:
             "bloqueados": self._p.bloqueados(),
             "n_nodos": self._p.n_nodos(),
             "n_aristas": self._p.n_aristas(),
+            "anclaje": self._p.anclaje(),          # (lat, lng) del origen del plano, o None
+            "distrito": self._p.region(),          # contorno del distrito en coordenadas del plano
         }

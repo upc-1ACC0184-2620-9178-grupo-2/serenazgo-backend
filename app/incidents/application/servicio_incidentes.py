@@ -35,9 +35,8 @@ class ServicioIncidentes:
     # --- comandos ---
     def registrar(self, tipologia: str, direccion: str, prioridad: Prioridad,
                   x: float, y: float) -> Incidente:
-        lim = self._ubicador.limites()
-        if not (lim["xmin"] <= x <= lim["xmax"] and lim["ymin"] <= y <= lim["ymax"]):
-            raise Invalido("La ubicación está fuera del distrito.")
+        if not self._ubicador.contiene(x, y):
+            raise Invalido("La ubicación está fuera de Ventanilla (otro distrito o el mar).")
         nodo = self._ubicador.ubicar(x, y, 2)
         self._manuales += 1
         self._llegada += 1

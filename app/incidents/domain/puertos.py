@@ -10,3 +10,11 @@ class UbicadorEnRed(ABC):
 
     @abstractmethod
     def limites(self) -> dict: ...
+
+    @abstractmethod
+    def contiene(self, x: float, y: float) -> bool:
+        """true si el punto está dentro de la zona de operación (Ventanilla)."""
+
+    @abstractmethod
+    def contiene(self, x: float, y: float) -> bool:
+        """true si el punto está dentro de la zona de operación (Ventanilla)."""

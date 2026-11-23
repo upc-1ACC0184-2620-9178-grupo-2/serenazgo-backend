@@ -29,7 +29,7 @@ uvicorn app.main:app --reload --port 8000
 - API: http://127.0.0.1:8000 · documentación interactiva: http://127.0.0.1:8000/docs
 - CORS: por defecto permite http://localhost:4200 (Angular). Otros orígenes:
   `ORIGENES_PERMITIDOS="https://mi-sitio.com,http://localhost:4200"`.
-- Pruebas: `python -m pytest -q` (39 pruebas: algoritmos vs NetworkX, dominio, planificación, contrato HTTP y reglas de arquitectura).
+- Pruebas: `python -m pytest -q` (44 pruebas: algoritmos vs NetworkX, dominio, planificación, contrato HTTP y reglas de arquitectura).
 
 ## Bounded contexts
 
@@ -55,6 +55,22 @@ app/<contexto>/
 `app/container.py` es el *composition root* (conecta todo) y `app/main.py` arma la API.
 `app/presentation/vista_despacho.py` es una API Composition (BFF): `GET /api/red` y `GET /api/estado`
 combinan varios contextos para la pantalla; solo lee.
+
+## Zona de operación: solo el distrito de Ventanilla
+La red vial simulada, las bases, los incidentes, los eventos del plan y los serenazgos se generan **dentro del contorno oficial del
+distrito de Ventanilla** (IGN, vía `joseluisq/peru-geojson-datasets`; `network/infrastructure/distrito_ventanilla.py`, 176 vértices,
+achicado ≈55 m hacia adentro). Nada cae en el mar, en Puente Piedra, Mi Perú ni Carabayllo.
+- El plano está en km (x este, y sur) con origen en el centro del distrito; `GET /api/red` entrega `anclaje` (lat, lng del origen) y
+  `distrito` (contorno en el plano) para que el frontend dibuje el límite y ubique todo en su lugar real.
+- Registrar un incidente o evento fuera del distrito responde **422** ("fuera de Ventanilla").
+- El puerto `GraphProvider.contiene(x, y)` decide qué es "dentro"; con `RED=osmnx` basta el rectángulo de la red descargada.
+
+## Zona de operación: solo el distrito de Ventanilla
+La red vial simulada, las bases, los incidentes y los eventos se generan **dentro del polígono oficial del distrito** (IGN,
+`network/infrastructure/distrito_ventanilla.py`, 176 vértices, ≈76 km²), nunca en el mar ni en distritos vecinos (Puente Piedra,
+Mi Perú, Carabayllo). El plano está en km (x este, y sur) con origen en el centro del distrito; `GET /api/red` entrega el
+`anclaje` (lat, lng) y el contorno (`distrito`) para dibujarlo. Registrar un incidente o evento fuera de Ventanilla responde 422.
+`tests/test_ventanilla.py` lo verifica (Ciudad Satélite y Pachacútec dentro; centro de Puente Piedra, Costa Azul/mar y Callao fuera).
 
 ## Cómo se comunican los contextos
 

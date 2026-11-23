@@ -62,21 +62,32 @@ class GeneradorDeEscenario:
         return [Serenazgo(i + 1, t, bases[i % len(bases)].id, bases[i % len(bases)].nodo)
                 for i, t in enumerate(tipos)]
 
-    def _focos(self, rng: random.Random) -> list[tuple[float, float]]:
+    def _uniforme(self, rng: random.Random) -> tuple[float, float]:
+        """Punto uniforme dentro de Ventanilla (rechaza lo que cae en el mar o en otro distrito)."""
         lim = self._red.limites()
-        return [(lim["xmin"] + rng.random() * (lim["xmax"] - lim["xmin"]),
-                 lim["ymin"] + rng.random() * (lim["ymax"] - lim["ymin"])) for _ in range(4)]
+        while True:
+            x = lim["xmin"] + rng.random() * (lim["xmax"] - lim["xmin"])
+            y = lim["ymin"] + rng.random() * (lim["ymax"] - lim["ymin"])
+            if self._red.contiene(x, y):
+                return x, y
+
+    def _focos(self, rng: random.Random) -> list[tuple[float, float]]:
+        return [self._uniforme(rng) for _ in range(4)]
+
+    def _punto(self, plan: PlanDeTurno, rng: random.Random) -> tuple[float, float]:
+        for _ in range(30):                     # 70 % cerca de una zona caliente, 30 % en cualquier parte
+            if plan.focos and rng.random() < 0.7:
+                fx, fy = rng.choice(plan.focos)
+                x, y = rng.gauss(fx, 0.7), rng.gauss(fy, 0.7)
+            else:
+                x, y = self._uniforme(rng)
+            if self._red.contiene(x, y):
+                return x, y
+        return self._uniforme(rng)
 
     def _evento(self, plan: PlanDeTurno, rng: random.Random, eid: int, minuto: float,
                 pct_cancelados: float = 0.15) -> Evento:
-        lim = self._red.limites()
-        if rng.random() < 0.7 and plan.focos:
-            fx, fy = rng.choice(plan.focos)
-            x = min(lim["xmax"], max(lim["xmin"], rng.gauss(fx, 0.6)))
-            y = min(lim["ymax"], max(lim["ymin"], rng.gauss(fy, 0.6)))
-        else:
-            x = lim["xmin"] + rng.random() * (lim["xmax"] - lim["xmin"])
-            y = lim["ymin"] + rng.random() * (lim["ymax"] - lim["ymin"])
+        x, y = self._punto(plan, rng)
         prio = Prioridad(rng.choices(["A", "M", "B"], weights=[20, 50, 30])[0])
         tip = rng.choices(list(PESO_TIPOLOGIA), weights=list(PESO_TIPOLOGIA.values()))[0]
         if tip == "Accidente de tránsito" and rng.random() < 0.5:
@@ -104,9 +115,9 @@ class GeneradorDeEscenario:
         def instante() -> float:      # picos de demanda a ~40 % y ~75 % del turno
             r = rng.random()
             if r < 0.30:
-                return rng.uniform(0, dur - 30)
+                return rng.uniform(0, dur - 50)   # deja margen para terminar antes del fin del turno
             centro = 0.40 if r < 0.65 else 0.75
-            return min(dur - 30, max(0.0, rng.gauss(centro * dur, 55)))
+            return min(dur - 50, max(0.0, rng.gauss(centro * dur, 55)))
 
         instantes = sorted(instante() for _ in range(n_eventos))
         if instantes:
@@ -141,9 +152,9 @@ class GeneradorDeEscenario:
         # agenda: algunos eventos programados para más adelante en el turno
         dur = turno.duracion_min
         desde = plan.ref_min + 10
-        if dur - 30 > desde and pct_agenda > 0:
-            n = round(eventos_por_hora * (dur - 30 - desde) / 60 * pct_agenda)
-            for m in sorted(rng.uniform(desde, dur - 30) for _ in range(n)):
+        if dur - 50 > desde and pct_agenda > 0:
+            n = round(eventos_por_hora * (dur - 50 - desde) / 60 * pct_agenda)
+            for m in sorted(rng.uniform(desde, dur - 50) for _ in range(n)):
                 plan.reportar(self._evento(plan, rng, plan.siguiente_id(), m))
         return plan
 
