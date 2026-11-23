@@ -14,3 +14,9 @@ class UbicadorRedAdapter(UbicadorEnRed):
 
     def limites(self):
         return self._red.limites()
+
+    def contiene(self, x, y):
+        return self._red.contiene(x, y)
+
+    def contiene(self, x, y):
+        return self._red.contiene(x, y)

@@ -22,6 +22,12 @@ class RedViaAdapter(RedViaPort):
     def limites(self):
         return self._red.limites()
 
+    def contiene(self, x, y):
+        return self._red.contiene(x, y)
+
+    def contiene(self, x, y):
+        return self._red.contiene(x, y)
+
     def ruta(self, origen, destino):
         return self._red.coordenadas_de_ruta(self._red.caminos_desde(origen).ruta_a(destino))
 

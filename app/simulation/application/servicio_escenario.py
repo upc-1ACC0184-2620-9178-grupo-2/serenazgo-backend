@@ -32,8 +32,14 @@ class ServicioEscenario:
         lim = self._red.limites()
         ancho, alto = lim["xmax"] - lim["xmin"], lim["ymax"] - lim["ymin"]
 
-        for nombre, fx, fy in p.bases:
-            x, y = lim["xmin"] + fx * ancho, lim["ymin"] + fy * alto
+        # una base por franja norte-sur del distrito, sobre el nodo de la red más cercano a su centro
+        nodos = sorted(self._red.vista()["nodos"], key=lambda n: n[1])
+        k = len(p.bases)
+        for i, nombre in enumerate(p.bases):
+            franja = nodos[i * len(nodos) // k:(i + 1) * len(nodos) // k]
+            mx = sorted(n[0] for n in franja)[len(franja) // 2]
+            my = sorted(n[1] for n in franja)[len(franja) // 2]
+            x, y = min(franja, key=lambda n: (n[0] - mx) ** 2 + (n[1] - my) ** 2)
             self._flota.registrar_base(nombre, x, y, self._red.ubicar_punto(x, y, 3))
 
         tipos = [t for t, n in p.flota for _ in range(n)]
@@ -42,7 +48,10 @@ class ServicioEscenario:
             self._flota.registrar_unidad(t, i % len(p.bases))
 
         for caso, tip, dire in muestra_de_incidentes(rng, p.n_incidentes, p.dataset_csv):
-            x, y = lim["xmin"] + rng.random() * ancho, lim["ymin"] + rng.random() * alto
+            while True:                          # solo dentro de Ventanilla
+                x, y = lim["xmin"] + rng.random() * ancho, lim["ymin"] + rng.random() * alto
+                if self._red.contiene(x, y):
+                    break
             prio = Prioridad(rng.choices(["A", "M", "B"], weights=[20, 50, 30])[0])
             self._incidentes.cargar(
                 Incidente(caso, tip, dire, prio, x, y, self._red.ubicar_punto(x, y, 2)))

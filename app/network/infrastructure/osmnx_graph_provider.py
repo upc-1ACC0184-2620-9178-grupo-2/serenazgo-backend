@@ -63,6 +63,16 @@ class OsmnxGraphProvider(GraphProvider):
         return min(range(len(self._xy)),
                    key=lambda j: (self._xy[j][0] - x) ** 2 + (self._xy[j][1] - y) ** 2)
 
+    def contiene(self, x, y):
+        lim = self.limites()
+        return lim["xmin"] <= x <= lim["xmax"] and lim["ymin"] <= y <= lim["ymax"]
+
+    def region(self):
+        return None
+
+    def anclaje(self):
+        return None
+
     def nodo_mas_cercano(self, x, y):
         return self.ubicar(x, y)
 

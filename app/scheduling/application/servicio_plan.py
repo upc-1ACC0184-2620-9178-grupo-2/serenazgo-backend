@@ -192,9 +192,8 @@ class ServicioPlan:
     def registrar_evento(self, tipologia: str, direccion: str, prioridad: Prioridad, x: float, y: float,
                          duracion_min: float | None = None) -> dict:
         plan, pl = self.plan(), self._planificador()
-        lim = self._red.limites()
-        if not (lim["xmin"] <= x <= lim["xmax"] and lim["ymin"] <= y <= lim["ymax"]):
-            raise Invalido("La ubicación está fuera del distrito.")
+        if not self._red.contiene(x, y):
+            raise Invalido("La ubicación está fuera de Ventanilla (otro distrito o el mar).")
         pl.resimular(plan)
         nuevo_id = max([*plan.eventos, *(g.id for g in plan.guion)], default=0) + 1
         e = Evento(nuevo_id, tipologia, direccion, prioridad, x, y, self._red.nodo_mas_cercano(x, y),

@@ -29,6 +29,14 @@ class RedViaPort(ABC):
     def limites(self) -> dict: ...
 
     @abstractmethod
+    def contiene(self, x: float, y: float) -> bool:
+        """true si el punto está dentro de Ventanilla."""
+
+    @abstractmethod
+    def contiene(self, x: float, y: float) -> bool:
+        """true si el punto está dentro de Ventanilla."""
+
+    @abstractmethod
     def ruta(self, origen: int, destino: int) -> list[list[float]]:
         """Polilínea [x, y] por las calles."""
 

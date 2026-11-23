@@ -8,17 +8,35 @@ import random
 import networkx as nx
 
 from app.network.domain.graph_provider import GraphProvider
+from app.network.infrastructure.distrito_ventanilla import VENTANILLA
 
 
 class SimulatedGraphProvider(GraphProvider):
     """Red vial simulada: intersecciones aleatorias unidas a sus 4 vecinas
     más cercanas. Tiempo de arista = distancia / velocidad (15-40 km/h),
-    con un mínimo de 0,2 min (sección 2.3 del informe). Coordenadas en km."""
+    con un mínimo de 0,2 min (sección 2.3 del informe).
+
+    Coordenadas en km sobre un plano local: x hacia el este, y hacia el sur, con origen en el centro del
+    distrito. Por defecto las intersecciones se generan **solo dentro del distrito de Ventanilla**
+    (`distrito`, polígono [lat, lng]); con `distrito=None` se usa un rectángulo de `ancho` × `alto` km."""
 
     def __init__(self, n_intersecciones: int = 900, ancho: float = 8.0,
-                 alto: float = 5.0, vecinos: int = 4, semilla: int = 42):
+                 alto: float = 5.0, vecinos: int = 4, semilla: int = 42,
+                 distrito: list[tuple[float, float]] | None = VENTANILLA):
         self._rng = random.Random(semilla)
-        self._ancho, self._alto = ancho, alto
+        self._anclaje = None
+        self._poly: list[tuple[float, float]] | None = None
+        if distrito:
+            lats, lngs = [p[0] for p in distrito], [p[1] for p in distrito]
+            lat0, lng0 = (min(lats) + max(lats)) / 2, (min(lngs) + max(lngs)) / 2
+            self._anclaje = (lat0, lng0)
+            self._kml = 111.32 * math.cos(math.radians(abs(lat0)))
+            self._poly = [self.a_plano(la, lo) for la, lo in distrito]
+            xs, ys = [p[0] for p in self._poly], [p[1] for p in self._poly]
+            self._bbox = (min(xs), max(xs), min(ys), max(ys))
+        else:
+            self._bbox = (0.0, ancho, 0.0, alto)
+        self._ancho, self._alto = self._bbox[1] - self._bbox[0], self._bbox[3] - self._bbox[2]
         self._n = n_intersecciones
         self._k = vecinos
         self._G = nx.Graph()
@@ -42,8 +60,12 @@ class SimulatedGraphProvider(GraphProvider):
 
     def _construir(self) -> None:
         r = self._rng
-        self._xy = [(r.uniform(0, self._ancho), r.uniform(0, self._alto))
-                    for _ in range(self._n)]
+        x0, x1, y0, y1 = self._bbox
+        self._xy = []
+        while len(self._xy) < self._n:                 # solo puntos dentro del distrito
+            x, y = r.uniform(x0, x1), r.uniform(y0, y1)
+            if self.contiene(x, y):
+                self._xy.append((x, y))
         for i in range(self._n):
             self._G.add_node(i)
         for i in range(self._n):
@@ -91,7 +113,37 @@ class SimulatedGraphProvider(GraphProvider):
         return self._G.number_of_edges()
 
     def limites(self):
-        return {"xmin": 0.0, "xmax": self._ancho, "ymin": 0.0, "ymax": self._alto}
+        x0, x1, y0, y1 = self._bbox
+        return {"xmin": x0, "xmax": x1, "ymin": y0, "ymax": y1}
+
+    # --- geografía del plano ---
+    def a_plano(self, lat: float, lng: float) -> tuple[float, float]:
+        """(lat, lng) -> (x este, y sur) en km desde el origen del plano."""
+        lat0, lng0 = self._anclaje
+        return (lng - lng0) * self._kml, (lat0 - lat) * 111.32
+
+    def a_geo(self, x: float, y: float) -> tuple[float, float]:
+        lat0, lng0 = self._anclaje
+        return lat0 - y / 111.32, lng0 + x / self._kml
+
+    def anclaje(self):
+        return self._anclaje
+
+    def region(self):
+        return list(self._poly) if self._poly else None
+
+    def contiene(self, x, y):
+        if not self._poly:
+            x0, x1, y0, y1 = self._bbox
+            return x0 <= x <= x1 and y0 <= y <= y1
+        dentro, n, j = False, len(self._poly), len(self._poly) - 1       # punto en polígono (rayo)
+        for i in range(n):
+            xi, yi = self._poly[i]
+            xj, yj = self._poly[j]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                dentro = not dentro
+            j = i
+        return dentro
 
     def ubicar(self, x, y, k=2):
         idx = len(self._xy)
