@@ -12,7 +12,7 @@ class ServicioRedVial:
     def __init__(self, proveedor: GraphProvider, bus: BusDeEventos):
         self._p = proveedor
         self._bus = bus
-        self._cache: dict[int, CaminosMinimos] = {}
+        self._cache: dict[tuple, CaminosMinimos] = {}
         self._version = -1
 
     def limites(self) -> dict:
@@ -30,14 +30,16 @@ class ServicioRedVial:
     def coordenadas_de(self, nodo: int) -> tuple[float, float]:
         return self._p.coordenadas()[nodo]
 
-    def caminos_desde(self, nodo: int) -> CaminosMinimos:
-        """Dijkstra desde `nodo`, con caché que se invalida al cambiar la red."""
+    def caminos_desde(self, nodo: int, trafico=None) -> CaminosMinimos:
+        """Dijkstra desde `nodo` (con el tráfico de la hora si se indica), con caché que se invalida al cambiar la red."""
         if self._version != self._p.version:
             self._cache.clear()
             self._version = self._p.version
-        if nodo not in self._cache:
-            self._cache[nodo] = calcular_caminos(self._p.adyacencia(), nodo)
-        return self._cache[nodo]
+        clave = (nodo, trafico.clave if trafico else None)
+        if clave not in self._cache:
+            adj = self._p.adyacencia_en(trafico) if trafico else self._p.adyacencia()
+            self._cache[clave] = calcular_caminos(adj, nodo)
+        return self._cache[clave]
 
     def coordenadas_de_ruta(self, nodos: list[int]) -> list[list[float]]:
         xy = self._p.coordenadas()

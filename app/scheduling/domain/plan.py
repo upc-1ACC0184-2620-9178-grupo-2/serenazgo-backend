@@ -39,6 +39,7 @@ class PlanDeTurno:
         self.focos: list[tuple[float, float]] = []  # zonas calientes de la ciudad
         self.rng = random.Random(0)
         self.generado_hasta = 0.0                 # hasta qué minuto se han generado eventos nuevos
+        self.ultimo_reparto = 0.0                 # minuto de la última redistribución automática
 
     # ---- tiempo y estado de cada serenazgo --------------------------------
     def minutos_de(self, e: Evento) -> float:

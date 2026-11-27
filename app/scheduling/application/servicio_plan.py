@@ -14,8 +14,10 @@ from app.scheduling.domain.redistribuidor import Redistribuidor
 from app.shared.kernel.errores import Conflicto, Invalido, NoEncontrado
 from app.shared.kernel.eventos import BusDeEventos
 from app.shared.kernel.prioridad import Prioridad
+from app.shared.kernel.trafico import trafico_a_las
 
 PRESUPUESTO_S = 1.0
+REPARTO_CADA_MIN = 20.0        # en tiempo real, cada cuántos minutos del plan se reacomodan los libres
 ZONA = timezone(timedelta(hours=-5))      # Perú: UTC-5, sin horario de verano
 
 
@@ -38,8 +40,11 @@ class ServicioPlan:
             p = self._repo.obtener()
         return self._sincronizar(p)         # en tiempo real, adelanta el plan hasta la hora actual
 
-    def _planificador(self) -> Planificador:
-        return Planificador(self._red)
+    def _planificador(self, plan: PlanDeTurno | None = None) -> Planificador:
+        """Planificador con el tráfico de la hora del plan (en hora punta las avenidas tardan más)."""
+        if plan is None:
+            return Planificador(self._red)
+        return Planificador(self._red, trafico=trafico_a_las(plan.turno.a_fecha(plan.ahora)))
 
     # ---- escenario --------------------------------------------------------------
     def crear_escenario(self, n_serenazgos: int = 100, n_eventos: int = 300, horas: float = 8.0,
@@ -63,7 +68,8 @@ class ServicioPlan:
             plan = self._gen.generar(n_serenazgos, n_eventos, horas, inicio, semilla, estrategia,
                                      pct_programados=0.5 if pct_programados is None else pct_programados)
         self._repo.guardar(plan)
-        pl = self._planificador()
+        pl = self._planificador(plan)
+        self._desplegar(plan, pl)               # los serenazgos salen de las bases a sus puestos de patrullaje
         pl.construir(plan)                      # reparte la agenda conocida de antemano
         pl.mejorar(plan, PRESUPUESTO_S)
         self._procesar_instante(plan, pl)
@@ -82,11 +88,13 @@ class ServicioPlan:
         ahora = self._reloj()
         objetivo = plan.ref_min + (ahora - plan.ref_real).total_seconds() / 60 * plan.velocidad
         dur = plan.turno.duracion_min
-        pl = pl or self._planificador()
+        pl = pl or self._planificador(plan)
         if objetivo >= dur:                     # cambio de turno
             self._avanzar_en_vivo(plan, pl, dur)
             nuevo = self._siguiente_turno(plan, objetivo - dur, ahora)
             self._repo.guardar(nuevo)
+            pl.actualizar_trafico(trafico_a_las(nuevo.turno.a_fecha(nuevo.ahora)))
+            self._desplegar(nuevo, pl)
             pl.construir(nuevo)
             pl.mejorar(nuevo, PRESUPUESTO_S)
             self._procesar_instante(nuevo, pl)
@@ -100,6 +108,25 @@ class ServicioPlan:
         plan.guion += self._gen.eventos_en_vivo(plan, plan.generado_hasta, hasta)
         plan.generado_hasta = hasta
         self._avanzar(plan, pl, hasta)
+        if plan.ahora - plan.ultimo_reparto >= REPARTO_CADA_MIN:
+            self._reparto_automatico(plan, pl)
+
+    def _desplegar(self, plan: PlanDeTurno, pl: Planificador) -> None:
+        """Inicio de turno: los serenazgos salen de las bases hacia puestos de patrullaje repartidos por Ventanilla
+        (más donde suele haber eventos), minimizando el traslado total (algoritmo húngaro)."""
+        r = Redistribuidor(pl, max_puestos=40, max_demanda=120).desplegar(plan, self._gen.demanda_historica(plan))
+        plan.aplicar_movimientos(r.movimientos)
+        plan.ultimo_reparto = plan.ahora
+
+    def _reparto_automatico(self, plan: PlanDeTurno, pl: Planificador) -> None:
+        """Mientras corre el turno, los serenazgos libres se reacomodan solos hacia donde hay más demanda."""
+        pl.resimular(plan)
+        r = Redistribuidor(pl).proponer(plan, extra={n: w * 0.15 for n, w in self._gen.demanda_historica(plan, 60).items()})
+        plan.aplicar_movimientos(r.movimientos)
+        plan.ultimo_reparto = plan.ahora
+        if r.movimientos:
+            self._bus.publicar(ev.SerenazgosRedistribuidos(
+                movimientos=len(r.movimientos), cobertura_antes=r.cobertura_antes, cobertura_despues=r.cobertura_despues))
 
     def _siguiente_turno(self, plan: PlanDeTurno, sobrante: float, ahora: datetime) -> PlanDeTurno:
         dur = plan.turno.duracion_min
@@ -168,9 +195,11 @@ class ServicioPlan:
             if not prox:
                 break
             plan.ahora = min(prox)
+            pl.actualizar_trafico(trafico_a_las(plan.turno.a_fecha(plan.ahora)))
             plan.fijar(plan.ahora)
             self._procesar_instante(plan, pl)
         plan.ahora = hasta
+        pl.actualizar_trafico(trafico_a_las(plan.turno.a_fecha(hasta)))
         plan.fijar(hasta)
         pl.resimular(plan)
         pl.reintentar_pendientes(plan)
@@ -180,7 +209,8 @@ class ServicioPlan:
     def avanzar_reloj(self, minutos: float) -> dict:
         if minutos <= 0:
             raise Invalido("Los minutos a avanzar deben ser positivos.")
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         if plan.tiempo_real:
             raise Invalido("El reloj sigue la hora real. Genera un escenario simulado para avanzarlo a mano.")
         antes = plan.asignacion()
@@ -191,7 +221,8 @@ class ServicioPlan:
 
     def registrar_evento(self, tipologia: str, direccion: str, prioridad: Prioridad, x: float, y: float,
                          duracion_min: float | None = None) -> dict:
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         if not self._red.contiene(x, y):
             raise Invalido("La ubicación está fuera de Ventanilla (otro distrito o el mar).")
         pl.resimular(plan)
@@ -207,13 +238,15 @@ class ServicioPlan:
         return {"evento_id": e.id, "serenazgo_id": sid, "asignado": asignado and sid is not None}
 
     def cancelar_evento(self, eid: int) -> dict:
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         cambios = self._cancelar(plan, pl, eid)
         self._bus.publicar(ev.EventoCancelado(evento=eid, reasignados=len(cambios)))
         return {"evento_id": eid, "reasignados": cambios}
 
     def baja_serenazgo(self, sid: int) -> dict:
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         antes = plan.asignacion()
         plan.dar_de_baja(sid)
         pl.resimular(plan)
@@ -224,7 +257,8 @@ class ServicioPlan:
         return {"serenazgo_id": sid, "reasignados": cambios}
 
     def optimizar(self) -> dict:
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         antes, r0 = plan.asignacion(), plan.resumen()
         pl.resimular(plan)
         pl.reintentar_pendientes(plan)
@@ -235,7 +269,8 @@ class ServicioPlan:
     def cambiar_estrategia(self, nombre: str) -> dict:
         if nombre not in ESTRATEGIAS:
             raise Invalido(f"Estrategia desconocida: {nombre}.")
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         antes, r0 = plan.asignacion(), plan.resumen()
         plan.estrategia = ESTRATEGIAS[nombre]
         pl.construir(plan)
@@ -244,7 +279,8 @@ class ServicioPlan:
         return {"antes": r0, "despues": plan.resumen(), "reasignados": self._cambios(antes, plan.asignacion())}
 
     def redistribuir(self) -> dict:
-        plan, pl = self.plan(), self._planificador()
+        plan = self.plan()
+        pl = self._planificador(plan)
         pl.resimular(plan)
         r = Redistribuidor(pl).proponer(plan)
         plan.aplicar_movimientos(r.movimientos)
@@ -259,7 +295,8 @@ class ServicioPlan:
     # ---- "qué pasa si": simula sobre una copia, sin tocar el plan real -------------
     def que_pasa_si(self, tipo: str, evento_id: int | None = None, serenazgo_id: int | None = None) -> dict:
         real = self.plan()
-        plan, pl = copy.deepcopy(real), self._planificador()
+        plan = copy.deepcopy(real)
+        pl = self._planificador(plan)
         pl.resimular(plan)
         antes, r0 = plan.asignacion(), plan.resumen()
         if tipo == "cancelar_evento" and evento_id is not None:
@@ -281,7 +318,8 @@ class ServicioPlan:
         """Aplica cada estrategia a una copia del plan y compara los resultados."""
         out = {}
         for nombre, est in ESTRATEGIAS.items():
-            plan, pl = copy.deepcopy(self.plan()), self._planificador()
+            plan = copy.deepcopy(self.plan())
+            pl = self._planificador(plan)
             plan.estrategia = est
             pl.construir(plan)
             pl.mejorar(plan, PRESUPUESTO_S)
@@ -305,9 +343,10 @@ class ServicioPlan:
 
     def vista(self) -> dict:
         plan = self.plan()
-        pl = self._planificador()
+        pl = self._planificador(plan)
         pl.resimular(plan)
         idx = plan.indice()
+        tr = trafico_a_las(plan.turno.a_fecha(plan.ahora))
         fecha = plan.turno.a_fecha
         eventos = []
         for e in sorted(plan.eventos.values(), key=lambda e: e.id):
@@ -325,8 +364,13 @@ class ServicioPlan:
             tareas = [*plan.fijas[sid], *plan.tareas_futuras[sid]]
             ev_ids = [t.evento_id for t in tareas if t.tipo == "evento"]
             pos, estado = self._posicion_y_estado(plan, sid)
+            sal = next((t for t in plan.fijas[sid] if t.tipo == "reposicion" and t.salida == 0), None)
+            puesto = None
+            if sal is not None:
+                px, py = self._red.coordenadas(sal.nodo)
+                puesto = {"x": round(px, 3), "y": round(py, 3), "minutos": round(sal.llegada - sal.salida, 1)}
             serenazgos.append({
-                "id": sid, "etiqueta": s.etiqueta, "tipo": s.tipo, "id_base": s.id_base,
+                "id": sid, "puesto": puesto, "etiqueta": s.etiqueta, "tipo": s.tipo, "id_base": s.id_base,
                 "en_servicio": s.en_servicio, "estado": estado, "x": pos[0], "y": pos[1],
                 "eventos": ev_ids, "carga_min": round(plan.carga_total(sid), 1),
                 "utilizacion_pct": round(100 * plan.carga_total(sid) / plan.turno.duracion_min, 1),
@@ -339,6 +383,7 @@ class ServicioPlan:
                       "fin": plan.turno.fin.isoformat(timespec="minutes"), "horas": plan.turno.horas,
                       "duracion_min": plan.turno.duracion_min, "ahora_min": round(plan.ahora, 3),
                       "tiempo_real": plan.tiempo_real, "velocidad": plan.velocidad,
+                      "trafico": {"arterial": tr.arterial, "local": tr.local, "nivel": tr.nivel},
                       "zona_horaria": "Lima (UTC-5)", "eventos_por_hora": plan.eventos_por_hora,
                       "ahora": fecha(plan.ahora).isoformat(timespec="minutes"),
                       "hora": fecha(plan.ahora).strftime("%H:%M")},

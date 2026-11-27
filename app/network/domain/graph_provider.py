@@ -20,6 +20,10 @@ class GraphProvider(ABC):
     def adyacencia(self) -> list[list[tuple[int, float]]]:
         """Lista de adyacencia [(vecino, tiempo_min), ...] por nodo."""
 
+    def adyacencia_en(self, trafico) -> list[list[tuple[int, float]]]:
+        """Adyacencia con los tiempos afectados por el tráfico (`Trafico`). Por defecto, vía libre."""
+        return self.adyacencia()
+
     @abstractmethod
     def aristas_viales(self) -> list[tuple[int, int]]:
         """Tramos de calle entre intersecciones (para dibujar el mapa)."""

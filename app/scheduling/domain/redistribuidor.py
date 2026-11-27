@@ -68,9 +68,21 @@ class Redistribuidor:
             cubierto += w if d <= self.radio else 0.0
         return round(100 * cubierto / total, 1), round(costo / total, 2)
 
-    def proponer(self, plan: PlanDeTurno) -> Redistribucion:
-        libres = self._libres(plan)
+    def proponer(self, plan: PlanDeTurno, extra: dict[int, float] | None = None) -> Redistribucion:
+        """Redistribuye a los serenazgos libres según la demanda reciente (más `extra`, la demanda histórica)."""
         demanda = self._demanda(plan)
+        for nodo, w in (extra or {}).items():
+            demanda[nodo] = demanda.get(nodo, 0.0) + w
+        demanda = dict(sorted(demanda.items(), key=lambda kv: -kv[1])[: self.max_demanda])
+        return self._colocar(plan, self._libres(plan), demanda, self.max_traslado)
+
+    def desplegar(self, plan: PlanDeTurno, demanda: dict[int, float]) -> Redistribucion:
+        """Inicio de turno: todos salen de sus bases hacia puestos de patrullaje repartidos por el distrito."""
+        libres = [(sid, s.nodo_base) for sid, s in plan.serenazgos.items() if s.en_servicio]
+        return self._colocar(plan, libres, demanda, max_traslado=1e9)
+
+    def _colocar(self, plan: PlanDeTurno, libres: list[tuple[int, int]], demanda: dict[int, float],
+                 max_traslado: float) -> Redistribucion:
         pos_antes = [nodo for _, nodo in libres]
         cob0, med0 = self._medidas(pos_antes, demanda)
         if not libres or not demanda:
@@ -122,7 +134,7 @@ class Redistribuidor:
         pos_despues = []
         for idx, ((sid, nodo), j) in enumerate(zip(libres, elegido)):
             destino, minutos = slots[j], costos[idx][j]
-            if destino != nodo and 0.5 <= minutos <= self.max_traslado:
+            if destino != nodo and 0.5 <= minutos <= max_traslado:
                 movs.append(Movimiento(sid, nodo, destino, round(minutos, 2)))
                 pos_despues.append(destino)
             else:

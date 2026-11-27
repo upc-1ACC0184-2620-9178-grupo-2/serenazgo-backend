@@ -13,19 +13,27 @@ import time
 from app.scheduling.domain.modelos import Tarea
 from app.scheduling.domain.plan import PlanDeTurno
 from app.scheduling.domain.puertos import RedViaPort
+from app.shared.kernel.trafico import LIBRE, Trafico
 
 
 class Planificador:
-    def __init__(self, red: RedViaPort, k_candidatos: int = 30):
+    def __init__(self, red: RedViaPort, k_candidatos: int = 30, trafico: Trafico = LIBRE):
         self.red = red
         self.k = k_candidatos
+        self.trafico = trafico              # tráfico de la hora: los tiempos de viaje dependen del horario
         self._filas: dict[int, list[float]] = {}
+
+    def actualizar_trafico(self, trafico: Trafico) -> None:
+        """Si cambió el tráfico (otra hora del día), los tiempos de viaje ya no sirven y se recalculan."""
+        if trafico.clave != self.trafico.clave:
+            self.trafico = trafico
+            self._filas.clear()
 
     # ---- tiempos de viaje (Dijkstra, con caché por nodo) -------------------
     def fila(self, nodo: int) -> list[float]:
         f = self._filas.get(nodo)
         if f is None:
-            f = self._filas[nodo] = self.red.tiempos_desde(nodo)
+            f = self._filas[nodo] = self.red.tiempos_desde(nodo, self.trafico)
         return f
 
     def t(self, a: int, b: int) -> float:
