@@ -101,6 +101,18 @@ class GeneradorDeEscenario:
             ev.cancelar_en = rep + timedelta(minutes=rng.uniform(5, 40))
         return ev
 
+    def demanda_historica(self, plan: PlanDeTurno, n: int = 120) -> dict[int, float]:
+        """Dónde suele haber eventos (histórico): alrededor de las zonas calientes y un fondo parejo por todo el distrito.
+        Sirve para repartir a los serenazgos antes de que llegue el primer evento."""
+        rng = random.Random(plan.rng.randrange(10 ** 6))
+        dem: dict[int, float] = {}
+        for _ in range(n):
+            x, y = self._uniforme(rng)
+            w = 1.0 + 8.0 * sum(math.exp(-((x - fx) ** 2 + (y - fy) ** 2) / (2 * 1.0 ** 2)) for fx, fy in plan.focos)
+            nodo = self._red.nodo_mas_cercano(x, y)
+            dem[nodo] = dem.get(nodo, 0.0) + w
+        return dem
+
     # --------------------------------------------------------------- modo simulado
     def generar(self, n_serenazgos: int = 100, n_eventos: int = 300, horas: float = 8.0,
                 inicio: datetime | None = None, semilla: int = 42, estrategia: str = "rapida",

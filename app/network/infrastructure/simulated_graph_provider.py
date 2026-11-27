@@ -40,18 +40,21 @@ class SimulatedGraphProvider(GraphProvider):
         self._n = n_intersecciones
         self._k = vecinos
         self._G = nx.Graph()
-        self._bloq: dict[tuple[int, int], float] = {}
+        self._bloq: dict[tuple[int, int], dict] = {}
         self._ver = 0
         self._adj: list[list[tuple[int, float]]] | None = None
         self._adj_ver = -1
+        self._adj_tr: dict[tuple[float, float], list[list[tuple[int, float]]]] = {}
+        self._adj_tr_ver = -1
         self._construir()
 
     # --- construcción -----------------------------------------------------
-    def _tiempo(self, a: int, b: int) -> float:
+    def _arista(self, a: int, b: int) -> dict:
+        """Tiempo de libre circulación y tipo de vía: las rápidas (≥ 30 km/h) son avenidas."""
         (xa, ya), (xb, yb) = self._xy[a], self._xy[b]
         dist = math.hypot(xa - xb, ya - yb)
         vel = self._rng.uniform(15, 40)
-        return max(0.2, dist / vel * 60)
+        return {"tiempo": max(0.2, dist / vel * 60), "clase": "arterial" if vel >= 30 else "local"}
 
     def _cercanos(self, x: float, y: float, k: int, excluir: int | None = None):
         cand = (j for j in range(self._n) if j != excluir)
@@ -71,7 +74,7 @@ class SimulatedGraphProvider(GraphProvider):
         for i in range(self._n):
             for j in self._cercanos(*self._xy[i], self._k, excluir=i):
                 if not self._G.has_edge(i, j):
-                    self._G.add_edge(i, j, tiempo=self._tiempo(i, j))
+                    self._G.add_edge(i, j, **self._arista(i, j))
         # Garantiza conectividad: une cada componente con la principal.
         comps = sorted(nx.connected_components(self._G), key=len, reverse=True)
         principal = set(comps[0])
@@ -79,7 +82,7 @@ class SimulatedGraphProvider(GraphProvider):
             a, b = min(((a, b) for a in c for b in principal),
                        key=lambda p: math.hypot(self._xy[p[0]][0] - self._xy[p[1]][0],
                                                 self._xy[p[0]][1] - self._xy[p[1]][1]))
-            self._G.add_edge(a, b, tiempo=self._tiempo(a, b))
+            self._G.add_edge(a, b, **self._arista(a, b))
             principal |= set(c)
 
     # --- interfaz ---------------------------------------------------------
@@ -102,6 +105,21 @@ class SimulatedGraphProvider(GraphProvider):
                 adj[b].append((a, d["tiempo"]))
             self._adj, self._adj_ver = adj, self._ver
         return self._adj
+
+    def adyacencia_en(self, trafico):
+        """Tiempos con el tráfico de la hora: avenidas y calles locales se congestionan distinto."""
+        if self._adj_tr_ver != self._ver:
+            self._adj_tr, self._adj_tr_ver = {}, self._ver
+        clave = trafico.clave
+        if clave not in self._adj_tr:
+            f = {"arterial": trafico.arterial, "local": trafico.local}
+            adj = [[] for _ in range(len(self._xy))]
+            for a, b, d in self._G.edges(data=True):
+                t = d["tiempo"] * f[d.get("clase", "local")]
+                adj[a].append((b, t))
+                adj[b].append((a, t))
+            self._adj_tr[clave] = adj
+        return self._adj_tr[clave]
 
     def aristas_viales(self):
         return [(a, b) for a, b in self._G.edges if a < self._n and b < self._n]
@@ -150,7 +168,7 @@ class SimulatedGraphProvider(GraphProvider):
         self._xy.append((x, y))
         self._G.add_node(idx)
         for j in self._cercanos(x, y, k):
-            self._G.add_edge(idx, j, tiempo=self._tiempo(idx, j))
+            self._G.add_edge(idx, j, **self._arista(idx, j))
         self._ver += 1
         return idx
 
@@ -160,14 +178,14 @@ class SimulatedGraphProvider(GraphProvider):
     def bloquear_tramo(self, a, b):
         if not self._G.has_edge(a, b):
             return False
-        self._bloq[(min(a, b), max(a, b))] = self._G[a][b]["tiempo"]
+        self._bloq[(min(a, b), max(a, b))] = dict(self._G[a][b])
         self._G.remove_edge(a, b)
         self._ver += 1
         return True
 
     def restablecer(self):
-        for (a, b), t in self._bloq.items():
-            self._G.add_edge(a, b, tiempo=t)
+        for (a, b), atributos in self._bloq.items():
+            self._G.add_edge(a, b, **atributos)
         self._bloq.clear()
         self._ver += 1
 

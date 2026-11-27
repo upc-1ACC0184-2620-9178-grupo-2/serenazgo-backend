@@ -10,8 +10,8 @@ class RedViaAdapter(RedViaPort):
     def __init__(self, red: ServicioRedVial):
         self._red = red
 
-    def tiempos_desde(self, nodo):
-        return self._red.caminos_desde(nodo).dist
+    def tiempos_desde(self, nodo, trafico=None):
+        return self._red.caminos_desde(nodo, trafico).dist
 
     def nodo_mas_cercano(self, x, y):
         return self._red.nodo_cercano(x, y)

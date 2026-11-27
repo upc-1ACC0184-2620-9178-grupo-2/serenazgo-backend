@@ -16,8 +16,8 @@ class BaseDePlan:
 
 class RedViaPort(ABC):
     @abstractmethod
-    def tiempos_desde(self, nodo: int) -> list[float]:
-        """Minutos mínimos desde `nodo` a todos los demás nodos (el grafo no es dirigido)."""
+    def tiempos_desde(self, nodo: int, trafico=None) -> list[float]:
+        """Minutos mínimos desde `nodo` a todos los demás nodos (el grafo no es dirigido), con el tráfico de la hora."""
 
     @abstractmethod
     def nodo_mas_cercano(self, x: float, y: float) -> int: ...

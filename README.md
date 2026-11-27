@@ -142,6 +142,19 @@ Por defecto el plan **sigue la hora real de Lima (UTC-5)** y los eventos nuevos 
 - Perú no tiene horario de verano, por eso se usa un desfase fijo UTC-5 (sin depender de `tzdata`). El estado vive en memoria:
   si Railway reinicia o duerme el servicio, se retoma el turno actual con la hora real.
 
+### Patrullaje, tráfico por horarios y asignación al que llega antes
+- **Serenazgos "afuera":** al empezar cada turno todos salen de sus bases a **puestos de patrullaje** repartidos por Ventanilla,
+  más donde suele haber eventos (k-medianas voraz sobre la demanda histórica + algoritmo húngaro para minimizar el traslado total).
+  Cada salida es un tramo `reposicion` del plan (se ve en la línea de tiempo y en la trayectoria del serenazgo: base → puesto → eventos).
+  En tiempo real, los libres se **reacomodan solos cada 20 min** hacia donde hay más demanda reciente.
+- **Tráfico por horarios (hora de Lima):** `shared/kernel/trafico.py` define cuánto se alarga un viaje según la hora; las
+  *avenidas* (vías rápidas) se congestionan más que las calles *locales* (hora punta ≈ ×2,0 y ×1,4; madrugada ×1,0). Los tiempos de
+  viaje del plan usan el tráfico de la hora en que se planifica. Los factores son un modelo ilustrativo, no datos reales de tráfico.
+- **Asignación automática al que llega antes:** cada evento que llega va al serenazgo que **tarda menos en llegar** (no al más cerca en
+  línea recta) en toda la zona de Ventanilla, ponderando prioridad, plazo y carga; si cambia algo (cancelación, baja, hora punta) se reasigna.
+  `tests/test_patrullaje_trafico.py` verifica que el elegido sea el de menor tiempo de viaje con el tráfico de esa hora (3, 8 y 18 h).
+- `GET /api/plan` entrega `turno.trafico` (nivel y factores) y, por serenazgo, su `puesto` de patrullaje y los minutos que tardó en llegar.
+
 | Método y ruta | Descripción |
 |---|---|
 | GET /api/plan | Estado completo: turno, serenazgos con sus tareas, eventos, métricas |
